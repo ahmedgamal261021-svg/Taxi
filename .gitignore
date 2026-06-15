@@ -1,0 +1,21 @@
+﻿# Build results
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# ASP.NET secrets
+appsettings.Development.json
+
+# Logs
+*.log
+
+# Publish folder
+publish/
+
+# Rider / VS Code
+.idea/
+.vscode/

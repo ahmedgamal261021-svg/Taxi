@@ -1,0 +1,6 @@
+@Taxiiii_HostAddress = http://localhost:5139
+
+GET {{Taxiiii_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
