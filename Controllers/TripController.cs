@@ -72,23 +72,23 @@ namespace Taxiiii.Controllers
 			return Ok(result);
 		}
 
-		[Authorize]
-		[HttpPost("cancelTrip/{TripId}")]
-		public async Task<IActionResult> CancelTrip(int TripId, string reason)
-		{
-			var UserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-			Console.WriteLine($"UserId : {UserId}");
-			if (UserId == null)
-			{
-				return Unauthorized(new ApiResponse<string>
-				{
-					Success = false,
-					Message = "Unauthorized"
-				});
-			}
-			var result = await _tripService.CancelTrip(TripId, UserId, reason);
-			return Ok(result);
-		}
+		//[Authorize]
+		//[HttpPost("cancelTrip/{TripId}")]
+		//public async Task<IActionResult> CancelTrip(int TripId, string reason)
+		//{
+		//	var UserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+		//	Console.WriteLine($"UserId : {UserId}");
+		//	if (UserId == null)
+		//	{
+		//		return Unauthorized(new ApiResponse<string>
+		//		{
+		//			Success = false,
+		//			Message = "Unauthorized"
+		//		});
+		//	}
+		//	var result = await _tripService.CancelTrip(TripId, UserId, reason);
+		//	return Ok(result);
+		//}
 		[Authorize]
 		[HttpGet]
 		[Route("available-trips")]

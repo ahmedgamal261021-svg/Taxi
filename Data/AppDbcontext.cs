@@ -18,10 +18,12 @@ namespace Taxiiii.Data
 
 		public DbSet<DriverCar> DriverCars { get; set; }
 		public DbSet<DriverLocation> DriverLocations { get; set; } 
+        
+		public DbSet<Notification> Notifications { get; set; }
 
 
 		//public DbSet<Rating> Ratings { get; set; }
-		//public DbSet<Notification> Notifications { get; set; }
+	
 		//public DbSet<Payment> Payments { get; set; }
 
 
@@ -69,6 +71,21 @@ namespace Taxiiii.Data
 	.IsUnique();
 			modelBuilder.Entity<DriverLocation>().HasOne(d=>d.Driver).WithOne().
 				HasForeignKey<DriverLocation>(d => d.DriverId).OnDelete(DeleteBehavior.Cascade);
+			modelBuilder.Entity<DriverLocation>()
+	.HasIndex(x => x.DriverId);
+
+			modelBuilder.Entity<Notification>()
+		.HasOne(n => n.User)
+		.WithMany(u => u.Notifications)
+		.HasForeignKey(n => n.UserId)
+		.OnDelete(DeleteBehavior.Cascade);
+			modelBuilder.Entity<Notification>()
+		.HasIndex(x => new
+		{
+			x.UserId,
+			x.IsRead
+		});
+
 
 
 			//		modelBuilder.Entity<Trip>()
@@ -95,15 +112,8 @@ namespace Taxiiii.Data
 
 
 
-	//		modelBuilder.Entity<DriverLocation>()
-	//.HasIndex(x => x.DriverId);
-			//		modelBuilder.Entity<Notification>()
-			//			.HasOne(n => n.User)
-			//			.WithMany()
-			//			.HasForeignKey(n => n.UserId)
-			//		.OnDelete(DeleteBehavior.Cascade);
-			//		modelBuilder.Entity<Notification>()
-			//.HasIndex(x => x.UserId);
+			//		modelBuilder.Entity<DriverLocation>()
+			//.HasIndex(x => x.DriverId);
 
 
 			//		modelBuilder.Entity<Payment>()

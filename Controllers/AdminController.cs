@@ -23,7 +23,7 @@ namespace Taxiiii.Controllers
 		[Authorize]
 		[Route("MakeAdmin")]
 		[HttpPost]
-		public async Task<IActionResult> MakeAdmin()
+		public async Task<IActionResult> MakeAdmin(int user)
 		{
 			var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
 			if (userId == 0)
@@ -37,7 +37,7 @@ namespace Taxiiii.Controllers
 			}
 			Console.WriteLine(userId+"ssssssssssssssssss");
 
-			var result = await _adminService.RigesterAsAdmin(userId);
+			var result = await _adminService.RigesterAsAdmin(userId, user);
 			if (result.Success)
 			{
 				return Ok(result.Message);

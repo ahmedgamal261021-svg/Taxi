@@ -19,3 +19,4 @@ publish/
 # Rider / VS Code
 .idea/
 .vscode/
+WeatherForecast.cs

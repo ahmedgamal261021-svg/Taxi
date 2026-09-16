@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Taxiiii.Data;
 
@@ -11,9 +12,11 @@ using Taxiiii.Data;
 namespace Taxiiii.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260619123340_AddNotification")]
+    partial class AddNotification
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -188,6 +191,9 @@ namespace Taxiiii.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<int?>("RigesterUserUserId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -203,6 +209,8 @@ namespace Taxiiii.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("RigesterUserUserId");
 
                     b.HasIndex("TripId");
 
@@ -415,12 +423,16 @@ namespace Taxiiii.Migrations
 
             modelBuilder.Entity("Taxiiii.Models.Notification", b =>
                 {
+                    b.HasOne("Taxiiii.Models.RigesterUser", null)
+                        .WithMany("Notifications")
+                        .HasForeignKey("RigesterUserUserId");
+
                     b.HasOne("Taxiiii.Models.Trip", "Trip")
                         .WithMany()
                         .HasForeignKey("TripId");
 
                     b.HasOne("Taxiiii.Models.RigesterUser", "User")
-                        .WithMany("Notifications")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

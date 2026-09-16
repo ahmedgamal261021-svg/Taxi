@@ -1,29 +1,40 @@
 ﻿using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Org.BouncyCastle.Ocsp;
+using System.Runtime.ConstrainedExecution;
 using Taxiiii.ApiResponse;
 using Taxiiii.Data;
 using Taxiiii.DtoS;
 using Taxiiii.Interfaces;
 using Taxiiii.Migrations;
 using Taxiiii.Models;
+using StackExchange.Redis;
 namespace Taxiiii.Services
 {
 	public class TripService : ITripService
 	{
 		private readonly AppDbContext _context;
 		private readonly IConfiguration _configuration;
-
-		public TripService(AppDbContext context, IConfiguration configuration)
+		private readonly IHubContext<RideHub> _hub;
+		private readonly IConnectionMultiplexer _redis;
+		private readonly IPendingTripQueue _queue;
+		public TripService(IPendingTripQueue queue, IConnectionMultiplexer redis, AppDbContext context, IConfiguration configuration, IHubContext<RideHub> hub)
 		{
 			_context = context;
 			_configuration = configuration;
+			_hub = hub;
+			_redis = redis;
+			_queue = queue;
 		}
 
 		public async Task<ApiResponse<int>> CreaeteTrip(CreateTripDto dto, int userId)
 		{
-			var user = await _context.RigesterUsers
-		.FirstOrDefaultAsync(x => x.UserId == userId);
+			const double radiusKm = 5;
+			
+			var user = await _context.RigesterUsers.FirstOrDefaultAsync(x => x.UserId == userId);
+
+			var locationUser = await _context.UserLocation.FirstOrDefaultAsync(x => x.UserId == userId);
 
 			if (user == null)
 			{
@@ -53,7 +64,8 @@ namespace Taxiiii.Services
 				Price = (decimal)dto.DistanceKm * 8,
 				DurationMinutes = (int)(dto.DistanceKm / 40 * 60),
 				UserId = userId,
-				StartTime = DateTime.UtcNow
+				StartTime = DateTime.UtcNow,
+				Status = TripStatus.Pending,
 
 				// Set start time to 10 minutes from now 
 			};
@@ -61,6 +73,8 @@ namespace Taxiiii.Services
 			_context.Trips.Add(trip);
 
 			await _context.SaveChangesAsync();
+
+			 await _queue.QueueAsync(trip.TripId);
 
 			return new ApiResponse<int>
 			{

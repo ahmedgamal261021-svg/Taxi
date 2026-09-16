@@ -1,6 +1,11 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Google.Apis.Auth;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using StackExchange.Redis;
 using System.IdentityModel.Tokens.Jwt;
+using System.Numerics;
 using System.Security.Claims;
 using System.Text;
 using Taxiiii.ApiResponse;
@@ -8,18 +13,23 @@ using Taxiiii.Data;
 using Taxiiii.DtoS;
 using Taxiiii.Interfaces;
 using Taxiiii.Models;
-using Google.Apis.Auth;
+
 namespace Taxiiii.Services
 {
 	public class UserService : IUserService
 	{
 		private readonly AppDbContext _context;
+		private readonly IConnectionMultiplexer _redis;
 		private readonly IConfiguration _configuration;
+		private readonly IHubContext<NotificationHub> _hub;
+		
 
-		public UserService(AppDbContext context, IConfiguration configuration)
+		public UserService(IConnectionMultiplexer redis, AppDbContext context, IConfiguration configuration , IHubContext<NotificationHub> hub)
 		{
 			_context = context;
 			_configuration = configuration;
+			_hub = hub;
+			_redis = redis;
 		}
 
 		public async Task<ApiResponse<string>> RegisterAsync(RegisterDto dto)
@@ -194,7 +204,43 @@ namespace Taxiiii.Services
 			trip.Status = TripStatus.Cancelled;
 			trip.CancelledAt = DateTime.UtcNow;
 			trip.CancelReason = Reason;
-			await _context.SaveChangesAsync();
+			var result = await _context.SaveChangesAsync();
+
+			var User = await _context.RigesterUsers.FindAsync(userId);
+			var UserName = User.FirstName + User.LastName; 
+			var UserPhone = User.PhoneNumber;
+
+			var driver = await _context.Drives
+				.FirstOrDefaultAsync(d => d.Id == trip.DriverId);
+
+			if (result > 0 && driver != null)
+			{
+				Console.WriteLine(driver.UserId.ToString());
+
+				var message =
+					$"تم إلغاء الرحلة بواسطة المستخدم {UserName}\n" +
+					$"📞 الهاتف: {UserPhone}\n" +
+					$"🚗 السبب : {Reason}\n";
+
+		
+				var notification = new Notification
+				{
+					UserId = driver.UserId,
+					TripId = trip.TripId,
+					Title = "Ride Cancelled",
+					Message = message,
+					Type = NotificationType.RideCancelled,
+					IsRead = false,
+					CreatedAt = DateTime.UtcNow
+				};
+
+				_context.Notifications.Add(notification);
+				await _context.SaveChangesAsync();
+
+			
+				await _hub.Clients.Group(driver.UserId.ToString())
+					.SendAsync("ReceiveNotification", message);
+			}
 			return new ApiResponse<string>
 			{
 				Success = true,
@@ -266,8 +312,9 @@ Console.WriteLine($"Current UserId = {userId}");
 			};
 
 		} //فيها تكلها 
-		public async Task<ApiResponse<string>> GetNearbyDrivers(int UserId, double radiusKm)
+		public async Task<ApiResponse<string>> GetNearbyDrivers(int UserId)
 		{
+			const double radiusKm = 5;
 			var user = await _context.RigesterUsers.FirstOrDefaultAsync(s => s.UserId == UserId);
 			if (user == null)
 			{
@@ -287,31 +334,59 @@ Console.WriteLine($"Current UserId = {userId}");
 				};
 			}
 			//double latitudeUser, double longitudeUser, double radiusKm
-			var drivers = await _context.DriverLocations
-			.Include(d => d.Driver)
-				.ThenInclude(driver => driver.User)
-			.Where(d => d.Driver.DriverAvailabilityStatu == DriverAvailabilityStatus.Online &&
-			d.Driver.User.Role == UserRole.Driver.ToString())
-			.ToListAsync();
-			Console.WriteLine(drivers);
+			var db = _redis.GetDatabase();
 
-			var nearbyDrivers = drivers
-				.Where(d => CalculateDistance(
-					locationUser.Latitude,
-					locationUser.Longitude,
-					d.Latitude,
-					d.Longitude) <= radiusKm)
+			var nearbyDrivers = await db.GeoRadiusAsync(
+				"drivers:locations",
+				locationUser.Longitude,
+				locationUser.Latitude,
+				radiusKm,
+				GeoUnit.Kilometers,
+				order: Order.Ascending
+				);
+			Console.WriteLine($"Nearby Drivers Count: {nearbyDrivers.Length}");
 
-				.ToList();
-			//System.Text.Json.JsonSerializer.Serialize(nearbyDrivers)
-			var result = nearbyDrivers.Select(d => new
+			foreach (var driver in nearbyDrivers)
 			{
-				d.DriverId,
-				d.Latitude,
-				d.Longitude,
-				DriverName = d.Driver.User.FirstName + " " + d.Driver.User.LastName,
-				d.Driver.Rating
-			});
+				Console.WriteLine(
+					$"DriverId: {driver.Member}, Distance: {driver.Distance} KM"
+				);
+			}
+
+			if (nearbyDrivers.Length == 0)
+			{
+				return new ApiResponse<string>
+				{
+					Success = true,
+					Message = "No nearby drivers found",
+					Data = "[]"
+				};
+			}
+
+			var driverIds = nearbyDrivers.Select(x => int.Parse(x.Member.ToString())).ToList();
+
+			var driverinfo  = await _context.Drives.Include(d=>d.User)
+				.Where(d =>
+			driverIds.Contains(d.Id) &&
+			d.DriverAvailabilityStatu == DriverAvailabilityStatus.Online &&
+			d.User.Role == UserRole.Driver.ToString()).ToListAsync();
+
+
+			var result = nearbyDrivers.Where(d => driverinfo.Any(x => x.Id == int.Parse(d.Member.ToString()))).
+				Select(d=>
+			{
+				var driverId = int.Parse(d.Member.ToString());
+				var driver = driverinfo.First(x => x.Id == driverId);
+
+				return new
+				{
+					DriverId = driverId,
+					DistanceKm = d.Distance,
+					DriverName = driver.User.FirstName + " " + driver.User.LastName,
+					Rating = driver.Rating
+				};
+			}).Take(10)
+		         .ToList();
 			return new ApiResponse<string>
 			{
 				Success = true,
@@ -319,38 +394,44 @@ Console.WriteLine($"Current UserId = {userId}");
 				Data = result != null ? System.Text.Json.JsonSerializer.Serialize(result) : "[]"
 			};
 		}
-		private double CalculateDistance(
-	double lat1,
-	double lon1,
-	double lat2,
-	double lon2)
+		public async Task<ApiResponse<string>> SelectDriver (int driverId, int tripId)
 		{
-			const double R = 6371; // km
+			var trip = await _context.Trips.FirstOrDefaultAsync(d => d.TripId == tripId &&
+			 d.Status == TripStatus.Pending
+			  );
+			if (trip == null)
+			{
+				return new ApiResponse<string>
+				{
+					Success = false,
+					Message = "Trip not found or not Pending"
+				};
+			}
+			var DriverInfo = await	_context.Drives
+				.Where
+				(d => d.Id == driverId && d.DriverAvailabilityStatu ==
+			DriverAvailabilityStatus.Online).ExecuteUpdateAsync(
+				  s => s.SetProperty( d=> d.DriverAvailabilityStatu , DriverAvailabilityStatus.Busy)); 
+			   
+			if (DriverInfo == 0) 
+			{
+				return new ApiResponse<string>
+				{
+					Success = false,
+					Message = "Driver is not available"
+				};
+			}
+			trip.DriverId = driverId; 
+			
+			await _context.SaveChangesAsync();
+			return new ApiResponse<string>
+			{
+				Success = true,
+				Message = "Driver selected successfully",
+				Data = driverId.ToString()
+			};
 
-			var dLat = DegreesToRadians(lat2 - lat1);
-			Console.WriteLine("///////dLat" + dLat);
-
-			var dLon = DegreesToRadians(lon2 - lon1);
-			Console.WriteLine("//////////dLon" + dLon);
-			var a =
-				Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
-				Math.Cos(DegreesToRadians(lat1)) *
-				Math.Cos(DegreesToRadians(lat2)) *
-				Math.Sin(dLon / 2) *
-				Math.Sin(dLon / 2);
-			Console.WriteLine("/////////a" + a);
-
-			var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-
-			return R * c;
 		}
-
-		private double DegreesToRadians(double degrees)
-		{
-			return degrees * Math.PI / 180;
-		}
-
-
 	}
 
 

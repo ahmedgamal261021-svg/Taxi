@@ -12,7 +12,7 @@ namespace Taxiiii.Models
 		[ForeignKey("UserId")]
 		public RigesterUser User { get; set; }
 		public DriverStatus DriverStatu { get; set; } = DriverStatus.Pending;    
-		public DriverAvailabilityStatus DriverAvailabilityStatu { get; set; } = DriverAvailabilityStatus.Offline;
+		public DriverAvailabilityStatus DriverAvailabilityStatu { get; set; } = DriverAvailabilityStatus.Online;
 		[Required]
 		public string LicenseNumber { get; set; }
 

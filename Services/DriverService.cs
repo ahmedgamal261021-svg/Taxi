@@ -1,12 +1,16 @@
 ﻿	
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Org.BouncyCastle.Asn1.X509;
+using StackExchange.Redis;
+using System.Text.Json;
 using Taxiiii.ApiResponse;
 using Taxiiii.Data;
 using Taxiiii.DtoS;
 using Taxiiii.Interfaces;
 using Taxiiii.Migrations;
 using Taxiiii.Models;
+
 
 namespace Taxiiii.Services
 {
@@ -15,10 +19,14 @@ namespace Taxiiii.Services
 
 		private readonly AppDbContext _dbcontext;
 		private readonly IHubContext<RideHub> _hubContext;
-		public DriverService(AppDbContext dbcontext, IHubContext<RideHub> hubContext)
+		private readonly IHubContext<NotificationHub> _hub;
+		private readonly IConnectionMultiplexer _redis;
+		public DriverService(IConnectionMultiplexer redis,  AppDbContext dbcontext, IHubContext<RideHub> hubContext , IHubContext<NotificationHub> hub)
 		{
 			_dbcontext = dbcontext;
 			_hubContext = hubContext;
+			_hub = hub;
+			_redis = redis;
 		}
 		public async Task<ApiResponse<string>> ApplyDriver(ApplyDriverDto applyDriverDto, int userId)
 
@@ -161,9 +169,11 @@ namespace Taxiiii.Services
 				Data = driverInfo
 			};
 		}
-		public async Task<ApiResponse<string>> LocationDriveAsync(UpdateLocationDto LocDto, int userId)
+		public async Task<ApiResponse<string>> LocationDriveAsync(UpdateLocationDto LocDto,int userId)
 		{
-			var driver = await _dbcontext.Drives.FirstOrDefaultAsync(d => d.UserId == userId);
+			var driver = await _dbcontext.Drives
+				.FirstOrDefaultAsync(d => d.UserId == userId);
+
 			if (driver == null)
 			{
 				return new ApiResponse<string>
@@ -172,43 +182,98 @@ namespace Taxiiii.Services
 					Message = "Driver not found"
 				};
 			}
-			var location = await _dbcontext.DriverLocations
-	 .FirstOrDefaultAsync(x => x.DriverId == driver.Id);
-
-
-			if (location == null)
+			var trip = await _dbcontext.Trips.FirstOrDefaultAsync(t => t.DriverId == driver.Id &&
+		t.Status == TripStatus.Accepted);
+			
+			Console.WriteLine($"Driver ID: {driver.Id}");
+			Console.WriteLine($"Trip ID: {trip?.TripId}");
+			Console.WriteLine($"Trip Status: {trip?.Status}");
+			Console.WriteLine($"Trip UserId: {trip?.UserId}");
+			
+			if (trip != null)
 			{
-				location = new DriverLocation
-				{
-					DriverId = driver.Id,
-					Latitude = LocDto.Latitude,
-					Longitude = LocDto.Longitude,
-					CreateAt = DateTime.UtcNow
-				};
-
-				_dbcontext.DriverLocations.Add(location);
+				Console.WriteLine($"Sending location to trip-{trip.TripId}");
+				await _hubContext.Clients
+					.Group($"trip-{trip.TripId}")
+					.SendAsync("DriverLocationUpdated", new
+					{
+						DriverId = driver.Id,
+						TripId = trip.TripId,
+						Latitude = LocDto.Latitude,
+						Longitude = LocDto.Longitude
+					});
+				Console.WriteLine("Location sent successfully");
 			}
-			else
+
+			var location = new
 			{
-				location.Latitude = LocDto.Latitude;
-				location.Longitude = LocDto.Longitude;
-				location.CreateAt = DateTime.UtcNow;
-			}
+				DriverId = driver.Id,
+				Latitude = LocDto.Latitude,
+				Longitude = LocDto.Longitude,
+				CreateAt = DateTime.UtcNow
+			};
 
-			await _dbcontext.SaveChangesAsync();
+			 
+			var db = _redis.GetDatabase();
 
-			await _hubContext.Clients.All.SendAsync(
-	"DriverLocationUpdated",
-	driver.Id,
+			await db.StringSetAsync(
+				$"driver:{driver.Id}",
+				JsonSerializer.Serialize(location), 
+				TimeSpan.FromMinutes(2)
+			);
+			await db.GeoAddAsync(
+	"drivers:locations",
+	LocDto.Longitude,
 	LocDto.Latitude,
-	LocDto.Longitude);
+	driver.Id.ToString()
+);
+
+
+			// ⚡ 2. Real-time update via SignalR (NO DB load)
+			await _hubContext.Clients
+				.Group($"driver-{driver.Id}")
+				.SendAsync("DriverLocationUpdated", new
+				{
+					Latitude = LocDto.Latitude,
+					Longitude = LocDto.Longitude
+				});
+
 			return new ApiResponse<string>
 			{
 				Success = true,
-				Message = "Location updated successfully.",
-				Data = null
+				Message = "Location updated in Redis + SignalR"
+			};
+
+		}
+		public async Task<ApiResponse<string>> GetDriverLocation(int driverId)
+		{
+			var db = _redis.GetDatabase();
+
+			var key = $"driver:{driverId}";
+
+			var location = await db.StringGetAsync(key);
+
+			if (location.IsNullOrEmpty)
+			{
+				return new ApiResponse<string>
+				{
+					Success = false,
+					Message = "Driver location not found"
+				};
+			}
+
+			return new ApiResponse<string>
+			{
+				Success = true,
+				Message = "Driver location" ,
+				Data = location.ToString()
 			};
 		}
+		//		await _hubContext.Clients.All.SendAsync(
+		//	"DriverLocationUpdated",
+		//driver.Id,
+		//LocDto.Latitude,
+		//LocDto.Longitude);
 		public async Task<ApiResponse<string>> SetStautueDriverByDriver(string status, int userId)
 		{
 			var driver = await _dbcontext.Drives
@@ -245,8 +310,8 @@ namespace Taxiiii.Services
 		}
 		public async Task<ApiResponse<string>> AcceptTrip(int tripId, int userId)
 		{
-			var user = await _dbcontext.RigesterUsers
-	.FirstOrDefaultAsync(x => x.UserId == userId);
+			var user = await _dbcontext.RigesterUsers.FirstOrDefaultAsync(x => x.UserId == userId);
+
 
 			if (user == null)
 			{
@@ -257,15 +322,17 @@ namespace Taxiiii.Services
 				};
 			}
 
-			if (user.Role == UserRole.User.ToString())
+			if (user.Role == UserRole.User.ToString() || user.Role == UserRole.Admin.ToString())
 			{
 				return new ApiResponse<string>
 				{
 					Success = false,
-					Message = "User cannot Accept trips"
+					Message = "User Or Admin cannot Accept trips"
 				};
 			}
-			var driver = await _dbcontext.Drives.FirstOrDefaultAsync(d => d.UserId == userId);
+			var driver = await _dbcontext.Drives.FirstOrDefaultAsync(d => d.UserId == userId &&
+			 d.DriverAvailabilityStatu ==
+							DriverAvailabilityStatus.Online);
 			if (driver == null)
 			{
 				return new ApiResponse<string>
@@ -293,9 +360,50 @@ namespace Taxiiii.Services
 			}
 			trip.Status = TripStatus.Accepted;
 			trip.DriverId = driver.Id;
-			trip.UserId = driver.UserId;
+			//trip.UserId = driver.UserId;
 			driver.DriverAvailabilityStatu = DriverAvailabilityStatus.Busy;
-			await _dbcontext.SaveChangesAsync();
+			var result = await _dbcontext.SaveChangesAsync();
+			var driverName = driver.User.FirstName + driver.User.LastName;
+			var driverPhone = driver.User.PhoneNumber;
+			var driverCar = await _dbcontext.DriverCars.Include(dc => dc.Cars)
+	.FirstOrDefaultAsync(dc => dc.DriverId == driver.Id);
+
+
+			var modelCar = driverCar?.Cars?.Brand;
+			var carNumber = driverCar?.Cars?.Color;
+
+			if (result > 0)
+			{
+				Console.WriteLine(trip.UserId.ToString());
+
+				var message =
+					$"تم قبول الرحلة بواسطة السائق {driverName}\n" +
+					$"📞 الهاتف: {driverPhone}\n" +
+					$"🚗 السيارة: {modelCar}\n" +
+					$"🔢 رقم السيارة: {carNumber}";
+
+			
+				var notification = new Notification
+				{
+					UserId = trip.UserId,
+					TripId = trip.TripId,
+					Title = "Ride Accepted",
+					Message = message,
+					Type = NotificationType.RideAccepted,
+					IsRead = false,
+					CreatedAt = DateTime.UtcNow
+				};
+
+				_dbcontext.Notifications.Add(notification);
+				await _dbcontext.SaveChangesAsync();
+				await _hubContext.Clients
+	.Group($"user-{trip.UserId}")
+	.SendAsync(
+		      "TripAccepted", message);
+	
+				await _hub.Clients.Group(trip.UserId.ToString())
+					.SendAsync("ReceiveNotification", message);
+			}
 			return new ApiResponse<string>
 			{
 				Success = true,
@@ -480,7 +588,39 @@ namespace Taxiiii.Services
 			}
 			Trip.Status = TripStatus.Cancelled;
 			Trip.CancelReason = Reason;
-			await _dbcontext.SaveChangesAsync();
+			var result = await _dbcontext.SaveChangesAsync();
+
+			var driverName = driver.User.FirstName + " " + driver.User.LastName;
+			var driverPhone = driver.User.PhoneNumber;
+
+			if (result > 0)
+			{
+				Console.WriteLine(Trip.UserId.ToString());
+
+				var message =
+					$"تم إلغاء الرحلة بواسطة السائق {driverName}\n" +
+					$"📞 الهاتف: {driverPhone}\n" +
+					$"🚗 السبب : {Reason}\n";
+
+		
+				var notification = new Notification
+				{
+					UserId = Trip.UserId,
+					TripId = Trip.TripId,
+					Title = "Ride Cancelled",
+					Message = message,
+					Type = NotificationType.RideCancelled,
+					IsRead = false,
+					CreatedAt = DateTime.UtcNow
+				};
+
+				_dbcontext.Notifications.Add(notification);
+				await _dbcontext.SaveChangesAsync();
+
+			
+				await _hub.Clients.Group(Trip.UserId.ToString())
+					.SendAsync("ReceiveNotification", message);
+			}
 
 			return new ApiResponse<string>
 			{
@@ -622,3 +762,25 @@ namespace Taxiiii.Services
 		}
 	}
 }
+//public async Task SyncRedisToSql()
+//{
+//	var db = _redis.GetDatabase();
+
+//	var keys = _redis.GetServer("localhost:6379")
+//		.Keys(pattern: "driver:*");
+
+//	foreach (var key in keys)
+//	{
+//		var data = await db.StringGetAsync(key);
+
+//		var location = JsonSerializer.Deserialize<DriverLocation>(data);
+
+//		await _dbcontext.DriverLocations
+//			.Where(x => x.DriverId == location.DriverId)
+//			.ExecuteUpdateAsync(s => s
+//				.SetProperty(x => x.Latitude, location.Latitude)
+//				.SetProperty(x => x.Longitude, location.Longitude)
+//				.SetProperty(x => x.CreateAt, DateTime.UtcNow)
+//			);
+//	}
+//}

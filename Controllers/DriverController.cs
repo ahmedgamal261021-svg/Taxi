@@ -82,7 +82,26 @@ namespace Taxiiii.Controllers
 					Message = "Unauthorized"
 				});
 			}
-			var result = await _driverService.LocationDriveAsync(LocDto, UserId);
+			
+			var result = await _driverService.LocationDriveAsync(LocDto, UserId); ;
+			return Ok(result);
+		}
+		[Authorize]
+		[HttpPost]
+		[Route("GetDriverLocation-drive")]
+		public async Task<IActionResult> GetDriverLocation(int driverId)
+		{
+			var UserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+			if (UserId == 0)
+			{
+				return Unauthorized(new ApiResponse<string>
+				{
+					Success = false,
+					Message = "Unauthorized"
+				});
+			}
+
+			var result = await _driverService.GetDriverLocation(driverId); ;
 			return Ok(result);
 		}
 		[Authorize]

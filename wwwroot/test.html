@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SignalR Test</title>
+</head>
+
+<body>
+
+<h2>Ride SignalR Test</h2>
+
+<button onclick="connect()">Connect</button>
+<button onclick="joinTrip()">Join Trip</button>
+
+<p id="status"></p>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+
+<script>
+
+let connection;
+
+async function connect() {
+
+    connection = new signalR.HubConnectionBuilder()
+        .withUrl("https://localhost:7046/rideHub")
+        .withAutomaticReconnect()
+        .build();
+
+	connection.on("DriverLocationUpdated", function (data) {
+
+		console.log(" DriverLocationUpdated RECEIVED");
+		console.log("Data:", data);
+
+		document.getElementById("status").innerText =
+			"RECEIVED: " + JSON.stringify(data);
+	});
+
+    await connection.start();
+
+    console.log("Connected!");
+
+    document.getElementById("status").innerText =
+        "Connected to RideHub";
+}
+
+	async function joinTrip() {
+
+		if (!connection) {
+			console.log("Connection is not initialized");
+			return;
+		}
+
+		if (connection.state !== signalR.HubConnectionState.Connected) {
+			console.log("Connection is not connected");
+			return;
+		}
+
+		console.log("Joining trip-2032...");
+
+		await connection.invoke("JoinTrip", 2032);
+
+		console.log("Joined trip-2032 successfully");
+
+		document.getElementById("status").innerText =
+			"Joined trip-2032";
+	}
+
+</script>
+
+</body>
+</html>

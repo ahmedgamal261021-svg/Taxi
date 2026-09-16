@@ -19,7 +19,7 @@ namespace Taxiiii.Services
 			_Context = context;
 		}
 
-		public async Task<ApiResponse<string>> RigesterAsAdmin(int userId)
+		public async Task<ApiResponse<string>> RigesterAsAdmin(int userId,int Numuser)
 		{
 			var response = new ApiResponse<string>();
 
@@ -30,14 +30,21 @@ namespace Taxiiii.Services
 				response.Message = "User not found.";
 				return response;
 			}
-			if (user.Role == "Admin")
+			if (user.Role != "Admin")
 			{
 				response.Success = false;
-				response.Message = "User is already an admin.";
+				response.Message = "User As Admin only can Assign All user to Admin.";
 				return response;
 			}
 
-			user.Role = "Admin";
+			var SerchOnuser = await _Context.RigesterUsers.FindAsync(Numuser);
+			if (SerchOnuser == null)
+			{
+				response.Success = false;
+				response.Message = "User That want to Convert to Admin not found.";
+				return response;
+			}
+			SerchOnuser.Role = "Admin";
 
 			try
 			{

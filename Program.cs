@@ -1,13 +1,14 @@
+using MailKit.Net.Smtp;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using MailKit.Net.Smtp;
-using MimeKit;
 using Microsoft.IdentityModel.Tokens;
-
+using MimeKit;
+using StackExchange.Redis;
 using System.Text;
 using Taxiiii.Data;
 using Taxiiii.EmailService;
 using Taxiiii.Interfaces;
+
 using Taxiiii.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,12 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 
 builder.Services.AddControllers();
+// Redis
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+	var configuration = builder.Configuration["Redis:ConnectionString"];
+	return ConnectionMultiplexer.Connect(configuration);
+});
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -22,9 +29,11 @@ builder.Services.AddScoped<IUserService, UserService>();
 //builder.Services.AddScoped<ITripService, TripService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<AdminService>();
+builder.Services.AddScoped<NotificationService>();
 
 builder.Services.AddScoped<IDriverService, DriverService>();
 builder.Services.AddScoped<TripService>();
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 .AddJwtBearer(options =>
 {
@@ -40,6 +49,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 		IssuerSigningKey = new SymmetricSecurityKey(
 			Encoding.UTF8.GetBytes(builder.Configuration["JWT:Key"]))
+	};
+	options.Events = new JwtBearerEvents
+	{
+		OnMessageReceived = context =>
+		{
+			var accessToken = context.Request.Query["access_token"];
+
+			var path = context.HttpContext.Request.Path;
+
+			if (!string.IsNullOrEmpty(accessToken)
+				&& path.StartsWithSegments("/NotificationHub"))
+			{
+				context.Token = accessToken;
+			}
+
+			return Task.CompletedTask;
+		}
 	};
 });
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -75,6 +101,8 @@ builder.Services.AddSwaggerGen(c =>
 });
 //builder.WebHost.UseUrls("http://0.0.0.0:5139");
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<IPendingTripQueue, PendingTripQueue>();
+builder.Services.AddHostedService<PendingTripService>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -86,11 +114,13 @@ if (app.Environment.IsDevelopment())
 
 //app.UseHttpsRedirection();
 
-
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
+
 app.MapHub<RideHub>("/rideHub");
+app.MapHub<NotificationHub>("/NotificationHub");
 
 app.Run();

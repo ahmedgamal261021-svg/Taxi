@@ -4,7 +4,7 @@ namespace Taxiiii.Interfaces
 {
 	public interface IAdminService
 	{
-		Task<ApiResponse<string>> RigesterAsAdmin(int usrId); 
+		Task<ApiResponse<string>> RigesterAsAdmin(int usrId , int user); 
 
 		Task<ApiResponse<List<RigesterUser>>> GetAllUsers();
         Task<ApiResponse<List<Drive>>> GetAllDriver();  

@@ -1,17 +1,18 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using MailKit.Net.Smtp;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using MimeKit;
 using System.Security.Claims;
 using Taxiiii.ApiResponse;
-using Taxiiii.DtoS;
 // Remove or comment out the following line since 'Taxiiii.Data' does not exist or is not needed
 // using Taxiiii.Data;
 using Taxiiii.Data;
-using Taxiiii.Models;
-using Microsoft.EntityFrameworkCore;
-using MailKit.Net.Smtp;
-using MimeKit;
+using Taxiiii.DtoS;
 using Taxiiii.EmailService;
+using Taxiiii.Migrations;
+using Taxiiii.Models;
 
 namespace Taxiiii.Controllers
 {
@@ -157,7 +158,7 @@ namespace Taxiiii.Controllers
 			var userLocation = await _context.UserLocation.FirstOrDefaultAsync(ul => ul.UserId == userId);
 			if (userLocation == null)
 			{
-				userLocation = new UserLocation
+				userLocation = new Models.UserLocation
 				{
 					UserId = userId,
 					Latitude = dto.Latitude,
@@ -250,7 +251,7 @@ namespace Taxiiii.Controllers
 		}
 		[HttpGet]
 		[Route("GetNearbyDrivers")]
-		public async Task<IActionResult> GetNearbyDrivers(int userId, double radiusKm)
+		public async Task<IActionResult> GetNearbyDrivers(int userId)
 		{
 			var UserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
 			if (UserId == 0)
@@ -262,8 +263,24 @@ namespace Taxiiii.Controllers
 				});
 			}
 
-			var result = await _userService.GetNearbyDrivers(userId, radiusKm);
+			var result = await _userService.GetNearbyDrivers(userId);
 			return Ok(result);
+		}
+		[HttpPost]
+		[Route("SellectDrivers")]
+		public async Task<IActionResult> SelectDriver ( int driverId, int tripId)
+	 	{
+			var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+			if (userId == 0)
+			{
+				return Unauthorized(new ApiResponse<string>
+				{
+					Success = false,
+					Message = "Unauthorized"
+				});
+			}
+			var result = await _userService.SelectDriver( driverId ,tripId);
+			return Ok(result); 
 		}
 	}
 }

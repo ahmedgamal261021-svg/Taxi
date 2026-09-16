@@ -1,0 +1,169 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>SignalR Notification Test</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial;
+            margin: 40px;
+        }
+
+        input, button {
+            padding: 10px;
+            margin: 5px;
+        }
+
+        #notification {
+            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            background: #f5f5f5;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🔔 SignalR Notification Test</h1>
+
+    <label>User ID:</label>
+    <input id="userId" type="number" value="1" />
+
+    <button onclick="connect()">Connect</button>
+
+    <div id="status">
+        Not Connected
+    </div>
+
+    <div id="notification">
+        No notification yet...
+    </div>
+
+
+    <script>
+
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/rideHub")
+            .withAutomaticReconnect()
+            .build();
+
+
+        // استقبال Notification
+		connection.on("TripAccepted", function (message) {
+
+			console.log("Notification received:", message);
+
+			document.getElementById("notification").innerText =
+				"🔔 " + message;
+        });
+
+		connection.on("NearbyDrivers", function (drivers) {
+
+			console.log("Nearby Drivers:", drivers);
+
+			const notification =
+				document.getElementById("notification");
+
+			notification.innerHTML = "";
+
+			drivers.forEach(driver => {
+
+				const div = document.createElement("div");
+				div.innerHTML = `
+            🚗 Driver ID: ${driver.driverId}
+            <br>
+            🧾 Trip ID: ${driver.tripId}
+            <br>
+            📍 Distance: ${driver.distanceKm.toFixed(2)} km
+            <br><br>
+
+            <button onclick="selectDriver(${driver.driverId}, ${driver.tripId})">
+                Select Driver
+            </button>
+
+            <hr>
+        `;
+
+				notification.appendChild(div);
+			});
+        });
+		async function selectDriver(driverId, tripId) {
+
+			console.log("Selected Driver:", driverId);
+			console.log("Trip ID:", tripId);
+
+			try {
+
+				const response = await fetch(
+					`/api/User/SellectDrivers?driverId=${driverId}&tripId=${tripId}`,
+					{
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json"
+						}
+					}
+				);
+
+				const result = await response.json();
+
+				console.log("API Response:", result);
+
+				if (result.success) {
+
+					alert("✅ Driver selected successfully");
+
+				} else {
+
+					alert("❌ " + result.message);
+				}
+
+			} catch (error) {
+				console.error("Error:", error);
+				alert("❌ " + error);
+			}
+		}
+
+
+        async function connect() {
+
+            try {
+
+                await connection.start();
+
+                document.getElementById("status").innerText =
+                    "🟢 Connected";
+
+                const userId =
+                    document.getElementById("userId").value;
+
+                await connection.invoke(
+                    "JoinUser",
+                    parseInt(userId)
+                );
+
+                document.getElementById("status").innerText =
+                    `🟢 Connected - Joined user-${userId}`;
+
+                console.log(
+                    `Joined user-${userId}`
+                );
+
+            }
+            catch (err) {
+
+                console.error(err);
+
+                document.getElementById("status").innerText =
+                    "🔴 Connection Failed";
+
+            }
+        }
+
+    </script>
+
+</body>
+</html>

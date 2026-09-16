@@ -11,6 +11,7 @@ namespace Taxiiii.Interfaces
 		Task  <ApiResponse<string>>  ApplyDriver(ApplyDriverDto applyDriverDto, int userId);
 		Task<ApiResponse<string>> AssignedCarToDriver(AssignedCar AssCar, int userId); 
 		Task<ApiResponse<DriverInfoDto>> InformationDrive (int userId) ;
+		Task<ApiResponse<string>> GetDriverLocation(int driverId) ;
 		Task<ApiResponse<string>> LocationDriveAsync(UpdateLocationDto LocDto, int userId);
 
 		Task<ApiResponse<string>> SetStautueDriverByDriver(string Staute, int userId); 
